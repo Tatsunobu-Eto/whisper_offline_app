@@ -1,0 +1,25 @@
+# Dependencies
+node_modules/
+__pycache__/
+*.pyc
+.env
+.venv/
+venv/
+
+# Large binaries / Offline packages
+offline_packages/
+app/models/
+app/backend/cuBLAS.and.cuDNN_CUDA12_win_v3/
+
+# Data
+app/data/uploads/
+app/data/results/
+app/data/stt.db
+
+# Build Artifacts
+app/frontend/dist/
+app/frontend/dist-electron/
+
+# OS
+.DS_Store
+Thumbs.db
