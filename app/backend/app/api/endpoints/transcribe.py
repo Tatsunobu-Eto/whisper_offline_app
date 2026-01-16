@@ -18,6 +18,11 @@ from app.models.session import Session as SessionModel, Transcription
 from app.models.settings import AppSettings
 from app.api import deps
 from app.models.user import User
+import logging
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger("transcribe_api")
 
 router = APIRouter()
 # Simple thread pool for offloading blocking tasks
@@ -159,7 +164,10 @@ async def transcribe_file(
 
 @router.websocket("/stream")
 async def websocket_endpoint(websocket: WebSocket):
+    client_info = f"{websocket.client.host}:{websocket.client.port}" if websocket.client else "unknown"
+    logger.info(f"WebSocket connecting from {client_info}")
     await websocket.accept()
+    logger.info(f"WebSocket connected: {client_info}")
     
     # Configuration
     SILENCE_TIMEOUT = 0.5 
@@ -192,6 +200,7 @@ async def websocket_endpoint(websocket: WebSocket):
 
     # Background Task: Periodic Partial Transcription
     async def transcriber():
+        logger.info("Transcriber task started")
         while state["running"]:
             await asyncio.sleep(0.1) # Check interval
             
@@ -208,6 +217,7 @@ async def websocket_endpoint(websocket: WebSocket):
 
                         # CPU-intensive blocking call offloaded to thread
                         # Use beam_size=1 (Greedy) for fast partial results
+                        # logger.info(f"Processing partial transcription (len={len(process_buffer)})...") 
                         text = await loop.run_in_executor(
                             executor, 
                             whisper_service.transcribe_audio_data, 
@@ -220,6 +230,7 @@ async def websocket_endpoint(websocket: WebSocket):
                         
                         # Only send if still speaking (avoid race with Final)
                         if text.strip() and state["running"] and state["is_speaking"]:
+                            # logger.info(f"Partial result: {text[:20]}...")
                             await websocket.send_json({
                                 "type": "partial", 
                                 "text": text.strip(), 
@@ -227,12 +238,13 @@ async def websocket_endpoint(websocket: WebSocket):
                             })
                             state["last_partial_time"] = now
                     except Exception as e:
-                        print(f"Partial transcr error: {e}")
+                        logger.error(f"Partial transcr error: {e}")
 
     transcriber_task = asyncio.create_task(transcriber())
 
     # Helper for Finalization
     async def finalize_utterance(buffer_snapshot):
+        logger.info(f"Finalizing utterance (buffer len={len(buffer_snapshot)})")
         try:
             prompt = state["last_transcript"][-200:] if state["last_transcript"] else None
             
@@ -246,6 +258,7 @@ async def websocket_endpoint(websocket: WebSocket):
                 actual_model_size
             )
             if text.strip() and state["running"]:
+                logger.info(f"Final result: '{text}'")
                 # Update context
                 state["last_transcript"] += text + " "
                 
@@ -254,8 +267,10 @@ async def websocket_endpoint(websocket: WebSocket):
                     "text": text.strip(), 
                     "timestamp": datetime.utcnow().timestamp()
                 })
+            else:
+                logger.info("Final result was empty or skipped")
         except Exception as e:
-            print(f"Final transcr error: {e}")
+            logger.error(f"Final transcr error: {e}")
 
     try:
         while True:
@@ -271,6 +286,7 @@ async def websocket_endpoint(websocket: WebSocket):
             
             if is_speech:
                 if not state["is_speaking"]:
+                    logger.info("VAD: Speech START detected")
                     state["is_speaking"] = True
                     state["last_partial_time"] = datetime.utcnow().timestamp()
                 
@@ -284,6 +300,7 @@ async def websocket_endpoint(websocket: WebSocket):
                     
                     if state["silence_duration"] > SILENCE_TIMEOUT:
                         # Utterance ended
+                        logger.info(f"VAD: Speech END detected (Silence {state['silence_duration']:.2f}s > {SILENCE_TIMEOUT}s)")
                         process_buffer = state["audio_buffer"].copy()
                         state["audio_buffer"] = np.array([], dtype=np.float32)
                         state["is_speaking"] = False
@@ -294,6 +311,7 @@ async def websocket_endpoint(websocket: WebSocket):
 
             # Safety Buffer Limit (Automatic cut if too long)
             if len(state["audio_buffer"]) > SAMPLE_RATE * MAX_BUFFER_DURATION:
+                logger.warning("VAD: Max buffer duration reached, forcing finalize")
                 process_buffer = state["audio_buffer"].copy()
                 state["audio_buffer"] = np.array([], dtype=np.float32)
                 state["is_speaking"] = False
@@ -302,10 +320,11 @@ async def websocket_endpoint(websocket: WebSocket):
                 asyncio.create_task(finalize_utterance(process_buffer))
 
     except WebSocketDisconnect:
-        pass
+        logger.info("WebSocket disconnected")
     except Exception as e:
-        print(f"WebSocket Error: {e}")
+        logger.error(f"WebSocket Error: {e}")
     finally:
+        logger.info("Cleaning up WebSocket resources...")
         state["running"] = False
         transcriber_task.cancel()
         try:
