@@ -1,6 +1,8 @@
 import torch
 import numpy as np
 import logging
+import os
+from app.core.config import settings
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -14,8 +16,19 @@ class VadService:
     def load_model(self):
         if self.model is None:
             try:
-                # Load Silero VAD
-                # force_reload=False ensures we use cached model if available
+                # 1. Try Local Load
+                vad_path = os.path.join(settings.MODELS_DIR, "vad", "silero_vad.jit")
+                if os.path.exists(vad_path):
+                    logger.info(f"Loading local VAD model from {vad_path}...")
+                    self.model = torch.jit.load(vad_path)
+                    self.model.to(torch.device('cpu'))
+                    # Utils are not strictly needed for just running the model inference
+                    self.utils = None 
+                    logger.info("Local Silero VAD model loaded successfully.")
+                    return
+
+                # 2. Fallback to torch.hub
+                logger.info("Local VAD model not found. Trying torch.hub...")
                 self.model, self.utils = torch.hub.load(
                     repo_or_dir='snakers4/silero-vad',
                     model='silero_vad',
@@ -25,7 +38,7 @@ class VadService:
                 )
                 # Ensure model is on CPU to save GPU for Whisper
                 self.model.to(torch.device('cpu'))
-                logger.info("Silero VAD model loaded successfully (CPU).")
+                logger.info("Silero VAD model loaded successfully (CPU) via Hub.")
             except Exception as e:
                 logger.error(f"Failed to load Silero VAD: {e}")
                 raise e

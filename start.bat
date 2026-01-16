@@ -4,7 +4,7 @@ setlocal
 set "PATH=%~dp0app\backend\cuBLAS.and.cuDNN_CUDA12_win_v3;%PATH%"
 
 echo ==========================================
-echo   Offline STT System - Portable Launcher
+echo   Offline STT System - Web Launcher
 echo ==========================================
 
 cd /d %~dp0
@@ -26,16 +26,21 @@ cd app\backend
 start "STT Backend" ".venv\Scripts\python.exe" "%APP_MAIN%"
 cd ..\..
 
-echo Step 2: Starting Frontend (Electron)...
+echo Step 2: Starting Frontend (Web)...
 cd app\frontend
 :: Run frontend in a separate window
-start "STT Frontend" cmd /k "npm run dev:electron"
+start "STT Frontend" cmd /k "npm run dev"
 cd ..\..
+
+echo Step 3: Opening Browser...
+:: Wait a bit for Vite to start
+timeout /t 3 >nul
+start http://localhost:5173
 
 echo.
 echo ==========================================
 echo   System started successfully!
-echo   Wait for the Electron window to appear.
+echo   Web Interface: http://localhost:5173
 echo ==========================================
 pause
 exit /b
