@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { getSessionDetail } from '../api/client';
-import { ArrowLeft, Download, Clock, MessageSquareText } from 'lucide-react';
+import { ArrowLeft, Download, Clock, MessageSquareText, FileText, FileJson } from 'lucide-react';
 import { clsx } from 'clsx';
 
 interface TranscriptionViewProps {
@@ -31,6 +31,7 @@ export const TranscriptionView: React.FC<TranscriptionViewProps> = ({ sessionId,
   const [data, setData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [isExporting, setIsExporting] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -46,6 +47,47 @@ export const TranscriptionView: React.FC<TranscriptionViewProps> = ({ sessionId,
     };
     fetchData();
   }, [sessionId]);
+
+  const handleExport = (format: 'txt' | 'json') => {
+      if (!data) return;
+      setIsExporting(true);
+      try {
+          let content = "";
+          let mimeType = "";
+          let extension = "";
+
+          if (format === 'json') {
+              content = JSON.stringify(data, null, 2);
+              mimeType = "application/json";
+              extension = "json";
+          } else {
+              // Text format
+              const header = `[${new Date(data.created_at).toLocaleString()}] ${data.filename}`;
+              const body = data.segments.map((s: any) => {
+                  const speaker = s.speaker ? `[${s.speaker}] ` : "";
+                  return `${speaker}${s.text}`;
+              }).join("\n");
+              content = `${header}\n${"-".repeat(header.length)}\n${body}`;
+              mimeType = "text/plain";
+              extension = "txt";
+          }
+
+          const blob = new Blob([content], { type: mimeType });
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = `${data.filename}_export.${extension}`;
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+          URL.revokeObjectURL(url);
+      } catch (e) {
+          console.error("Export failed", e);
+          alert("エクスポートに失敗しました");
+      } finally {
+          setIsExporting(false);
+      }
+  };
 
   if (loading) return <div className="p-8 text-center">詳細を読み込み中...</div>;
   if (error) return <div className="p-8 text-center text-red-500">エラー: {error}</div>;
@@ -71,10 +113,25 @@ export const TranscriptionView: React.FC<TranscriptionViewProps> = ({ sessionId,
             </div>
           </div>
         </div>
-        <button className="flex items-center px-3 py-1.5 text-sm font-medium text-gray-700 bg-white border rounded-md hover:bg-gray-50 shadow-sm">
-            <Download className="w-4 h-4 mr-2" />
-            エクスポート
-        </button>
+        
+        <div className="flex items-center space-x-2">
+            <button 
+                onClick={() => handleExport('txt')}
+                disabled={isExporting}
+                className="flex items-center px-3 py-1.5 text-sm font-medium text-gray-700 bg-white border rounded-md hover:bg-gray-50 shadow-sm"
+            >
+                <FileText className="w-4 h-4 mr-2" />
+                TXT
+            </button>
+            <button 
+                onClick={() => handleExport('json')}
+                disabled={isExporting}
+                className="flex items-center px-3 py-1.5 text-sm font-medium text-gray-700 bg-white border rounded-md hover:bg-gray-50 shadow-sm"
+            >
+                <FileJson className="w-4 h-4 mr-2" />
+                JSON
+            </button>
+        </div>
       </div>
 
       {/* Content */}
